@@ -92,6 +92,8 @@ main{max-width:1100px;margin:0 auto;padding:18px 14px 60px}
 .btn.primary:disabled{background:#9aa6c2;border-color:#9aa6c2;cursor:not-allowed}
 .btn.danger{background:var(--danger);border-color:var(--danger);color:#fff}
 .btn.ghost{background:transparent}
+a.btn{text-decoration:none;text-align:center;color:inherit;display:inline-block}
+.snap-img{width:100%;border-radius:12px;border:2px solid var(--line);display:block;background:#fff}
 .btn.big{font-size:1.25rem;padding:16px 28px;border-radius:16px}
 
 /* Modal */
@@ -201,6 +203,7 @@ label.f .hint{font-weight:600;font-size:.82rem;color:var(--muted)}
       </div>
       <input class="search" id="q" type="search" placeholder="Buscar número o nombre…" autocomplete="off">
       <button class="btn" id="copy-disp">Copiar disponibles</button>
+      <button class="btn primary" id="snap-btn">Imagen para compartir</button>
     </div>
     <div class="legend">
       <span><i class="sw d"></i>Disponible</span>
@@ -317,6 +320,20 @@ label.f .hint{font-weight:600;font-size:.82rem;color:var(--muted)}
       <button class="btn" id="cf-no">Volver</button>
       <button class="btn primary" id="cf-ok">Aceptar</button>
     </div>
+  </div>
+</div>
+
+<!-- Imagen para compartir -->
+<div id="snapbox" class="overlay" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="snap-title" style="max-width:620px">
+    <div class="sheet-head"><h2 id="snap-title" style="margin:0">Imagen para compartir</h2><button class="x" data-close>Cerrar</button></div>
+    <p style="color:var(--muted);margin:6px 0 12px">Se ven los números disponibles. Los reservados y pagados aparecen tachados y sin nombres.</p>
+    <img id="snap-img" class="snap-img" alt="Vista previa de la grilla">
+    <div class="sheet-actions">
+      <a class="btn" id="snap-dl" download="rifa.png">Descargar</a>
+      <button class="btn primary" id="snap-share">Compartir</button>
+    </div>
+    <p id="snap-tip" style="color:var(--muted);font-size:.85rem;margin:10px 0 0;text-align:center">En el celular también puedes mantener presionada la imagen para guardarla.</p>
   </div>
 </div>
 
@@ -557,6 +574,89 @@ $("#copy-disp").onclick=()=>{
   const list=rangeNums().filter(n=>estadoOf(S.nums.get(String(n)))==="disponible").map(pad);
   const head=S.cfg.nombre+(S.cfg.premio?" - Premio: "+S.cfg.premio:"")+"\nValor: "+money.format(S.cfg.precio)+"\n\nNúmeros disponibles ("+list.length+"):\n";
   copyText("Números disponibles",head+(list.length?list.join(", "):"¡Ya no quedan números!"));
+};
+/* ---------- imagen para compartir ---------- */
+function rrect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()}
+function fitFont(c,text,maxW,size,min,weight){
+  let s=size;c.font=weight+" "+s+"px Nunito, sans-serif";
+  while(c.measureText(text).width>maxW&&s>min){s-=2;c.font=weight+" "+s+"px Nunito, sans-serif"}
+  if(c.measureText(text).width>maxW){while(text.length>1&&c.measureText(text+"…").width>maxW)text=text.slice(0,-1);text+="…"}
+  return text;
+}
+async function makeSnapshot(){
+  try{await document.fonts.load("900 40px Nunito");await document.fonts.ready}catch(e){}
+  const cfg=S.cfg,nums=rangeNums(),cnt=counts(),me=($("#me").value||lsGet(LS_ME)||"").trim();
+  const cols=cfg.total<=100?10:cfg.total<=300?15:cfg.total<=600?20:25;
+  const rows=Math.ceil(nums.length/cols);
+  const W=1080,P=44,gap=cols>15?6:10;
+  const cw=(W-2*P-gap*(cols-1))/cols,ch=Math.round(cw*0.8);
+  const metaParts=["Valor: "+money.format(cfg.precio)];if(cfg.fecha)metaParts.push("Sorteo: "+fmtFecha(cfg.fecha));
+  const headH=cfg.premio?250:195,legH=74,footH=me?150:118;
+  const gridH=rows*ch+(rows-1)*gap;
+  const H=headH+P+gridH+legH+footH;
+  const cv=document.createElement("canvas");cv.width=W;cv.height=H;
+  const c=cv.getContext("2d");c.textBaseline="middle";
+  // fondo y encabezado
+  c.fillStyle="#f5f1ea";c.fillRect(0,0,W,H);
+  c.fillStyle="#28407a";c.fillRect(0,0,W,headH);
+  c.fillStyle="#e9a21b";c.fillRect(0,headH-8,W,8);
+  c.textAlign="center";c.fillStyle="#fff";
+  c.font="800 26px Nunito, sans-serif";c.globalAlpha=.8;c.fillText("RIFA A BENEFICIO",W/2,46);c.globalAlpha=1;
+  let t=fitFont(c,cfg.nombre,W-2*P,60,30,"900");c.fillText(t,W/2,100);
+  let y=150;
+  if(cfg.premio){t=fitFont(c,"Premio: "+cfg.premio,W-2*P,36,22,"800");c.fillStyle="#ffd98a";c.fillText(t,W/2,y);y+=48;c.fillStyle="#fff"}
+  t=fitFont(c,metaParts.join("   ·   "),W-2*P,30,20,"700");c.fillText(t,W/2,y);
+  // grilla
+  const fs=Math.round(ch*(padW()>=4?0.36:0.44));
+  nums.forEach((n,i)=>{
+    const x=P+(i%cols)*(cw+gap),yy=headH+P/1.2+Math.floor(i/cols)*(ch+gap);
+    const libre=estadoOf(S.nums.get(String(n)))==="disponible";
+    const r=Math.min(14,cw*.18);
+    rrect(c,x,yy,cw,ch,r);
+    if(libre){c.fillStyle="#fff";c.fill();c.lineWidth=cols>15?2:3;c.strokeStyle="#28407a";c.stroke()}
+    else{c.fillStyle="#ddd7cc";c.fill()}
+    c.font="900 "+fs+"px Nunito, sans-serif";c.fillStyle=libre?"#1e2330":"#b0a796";c.fillText(pad(n),x+cw/2,yy+ch/2+1);
+    if(!libre){c.save();rrect(c,x,yy,cw,ch,r);c.clip();c.strokeStyle="#a69c8a";c.lineWidth=cols>15?2:3;c.beginPath();c.moveTo(x+cw*.15,yy+ch*.15);c.lineTo(x+cw*.85,yy+ch*.85);c.moveTo(x+cw*.85,yy+ch*.15);c.lineTo(x+cw*.15,yy+ch*.85);c.stroke();c.restore()}
+  });
+  // leyenda
+  let ly=headH+P/1.2+gridH+legH/2+4;
+  c.font="800 26px Nunito, sans-serif";c.textAlign="left";
+  const l1="Disponible",l2="Vendido",sw=34,sp=14,g2=60;
+  const totalW=sw+sp+c.measureText(l1).width+g2+sw+sp+c.measureText(l2).width;
+  let lx=(W-totalW)/2;
+  rrect(c,lx,ly-sw/2,sw,sw,8);c.fillStyle="#fff";c.fill();c.lineWidth=3;c.strokeStyle="#28407a";c.stroke();
+  c.fillStyle="#1e2330";c.fillText(l1,lx+sw+sp,ly+1);lx+=sw+sp+c.measureText(l1).width+g2;
+  rrect(c,lx,ly-sw/2,sw,sw,8);c.fillStyle="#ddd7cc";c.fill();c.strokeStyle="#a69c8a";c.beginPath();c.moveTo(lx+7,ly-sw/2+7);c.lineTo(lx+sw-7,ly+sw/2-7);c.moveTo(lx+sw-7,ly-sw/2+7);c.lineTo(lx+7,ly+sw/2-7);c.stroke();
+  c.fillStyle="#1e2330";c.fillText(l2,lx+sw+sp,ly+1);
+  // pie
+  const fy=H-footH;c.fillStyle="#fff";c.fillRect(0,fy,W,footH);c.fillStyle="#e2dbcf";c.fillRect(0,fy,W,3);
+  c.textAlign="center";c.fillStyle="#23874c";
+  c.font="900 40px Nunito, sans-serif";
+  c.fillText(cnt.disp>0?("Quedan "+cnt.disp+" número"+(cnt.disp===1?"":"s")+" disponible"+(cnt.disp===1?"":"s")):"¡Todos los números vendidos!",W/2,fy+(me?48:52));
+  c.fillStyle="#636b7a";c.font="700 24px Nunito, sans-serif";
+  if(me){t=fitFont(c,"Pídele tu número a "+me,W-2*P,30,20,"800");c.fillStyle="#28407a";c.fillText(t,W/2,fy+94);c.fillStyle="#636b7a";c.font="700 22px Nunito, sans-serif";c.fillText("Actualizado: "+fmtDate(Date.now()),W/2,fy+128)}
+  else c.fillText("Actualizado: "+fmtDate(Date.now()),W/2,fy+90);
+  return cv;
+}
+let snapFile=null,snapUrl=null;
+$("#snap-btn").onclick=async()=>{
+  const b=$("#snap-btn");b.disabled=true;b.textContent="Generando…";
+  try{
+    const cv=await makeSnapshot();
+    const blob=await new Promise(r=>cv.toBlob(r,"image/png"));
+    const name=(S.cfg.nombre||"rifa").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")+"-disponibles.png";
+    snapFile=new File([blob],name,{type:"image/png"});
+    if(snapUrl)URL.revokeObjectURL(snapUrl);snapUrl=URL.createObjectURL(blob);
+    $("#snap-img").src=snapUrl;const dl=$("#snap-dl");dl.href=snapUrl;dl.download=name;
+    let can=false;try{can=!!(navigator.canShare&&navigator.canShare({files:[snapFile]}))}catch(e){}
+    $("#snap-share").hidden=!can;
+    openOverlay("#snapbox");
+  }catch(e){toast("No se pudo generar la imagen")}
+  b.disabled=false;b.textContent="Imagen para compartir";
+};
+$("#snap-share").onclick=async()=>{
+  if(!snapFile)return;
+  try{await navigator.share({files:[snapFile],title:S.cfg.nombre,text:"Números disponibles: "+S.cfg.nombre})}catch(e){if(e&&e.name!=="AbortError")toast("No se pudo compartir; usa Descargar")}
 };
 $("#me").oninput=e=>lsSet(LS_ME,e.target.value.trim());
 
